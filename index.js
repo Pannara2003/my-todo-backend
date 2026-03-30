@@ -18,7 +18,7 @@ app.use(express.json());
 // --- 2. ตั้งค่า CORS ---
 app.use(cors({
     origin: '*', 
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], 
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
@@ -39,11 +39,11 @@ const db = mysql.createPool({
 
 const JWT_SECRET = 'my_super_secret_123';
 
-// --- 4. ตั้งค่า Cloudinary (!!! แก้ไข 3 บรรทัดนี้ด้วยข้อมูลจากหน้าจอของคุณ !!!) ---
+// --- 4. ตั้งค่า Cloudinary ---
 cloudinary.config({ 
-  cloud_name: 'druaw4oi7', // พี่ใส่ให้แล้วจากรูปของคุณ
-  api_key: '535754114174867', // <--- แก้ตรงนี้
-  api_secret: 'CRZiXMy-9b18hqippFDxM_D8XgQ' // <--- แก้ตรงนี้
+  cloud_name: 'druaw4oi7',
+  api_key: '535754114174867',
+  api_secret: 'CRZiXMy-9b18hqippFDxM_D8XgQ'
 });
 
 // --- 5. ตั้งค่า Storage ให้เก็บรูปบน Cloud ---
@@ -96,11 +96,11 @@ app.post('/api/login', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "server error" }); }
 });
 
-// --- 8. API อัปโหลดรูปโปรไฟล์ (ตัวใหม่!) ---
+// --- 8. API อัปโหลดรูปโปรไฟล์ ---
 app.post('/api/profile/upload', authenticateToken, upload.single('profile_image'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ message: "no file uploaded" });
-        const imageUrl = req.file.path; // URL จาก Cloudinary
+        const imageUrl = req.file.path;
         await db.execute('UPDATE users SET profile_image = ? WHERE id = ?', [imageUrl, req.user.id]);
         res.json({ message: "profile image updated", profile_image: imageUrl });
     } catch (err) {
@@ -138,6 +138,24 @@ app.post('/api/todos', authenticateToken, async (req, res) => {
         await db.execute(sql, [req.user.id, title, description || '', task_type || 'Project Task', start_date || null, due_date || null, priority || 'Medium', status || 'pending']);
         res.status(201).json({ message: "task created" });
     } catch (err) { res.status(500).json({ message: "insert error" }); }
+});
+
+// --- เพิ่มส่วนแก้ไข Task (PUT) และ สลับสถานะ (PATCH) ---
+app.put('/api/todos/:id', authenticateToken, async (req, res) => {
+    const { title, description, task_type, start_date, due_date, priority, status } = req.body;
+    try {
+        const sql = `UPDATE todos SET title = ?, description = ?, task_type = ?, start_date = ?, due_date = ?, priority = ?, status = ? WHERE id = ? AND user_id = ?`;
+        await db.execute(sql, [title, description || '', task_type, start_date || null, due_date || null, priority, status, req.params.id, req.user.id]);
+        res.json({ message: "task updated" });
+    } catch (err) { res.status(500).json({ message: "update error" }); }
+});
+
+app.patch('/api/todos/:id/status', authenticateToken, async (req, res) => {
+    const { status } = req.body;
+    try {
+        await db.execute('UPDATE todos SET status = ? WHERE id = ? AND user_id = ?', [status, req.params.id, req.user.id]);
+        res.json({ message: "status updated" });
+    } catch (err) { res.status(500).json({ message: "patch error" }); }
 });
 
 app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
