@@ -8,22 +8,19 @@ const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
 
+// --- 1. นำเข้า Library สำหรับ Cloudinary ---
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
 const app = express();
 app.use(express.json());
 
-// --- 1. แก้ไขส่วน CORS ให้รองรับการ Deploy (สำคัญมาก!) ---
+// --- 2. ตั้งค่า CORS ---
 app.use(cors({
-    origin: '*', // อนุญาตให้ทุก Domain (รวมถึง Vercel) เข้าถึงได้
+    origin: '*', 
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// --- 2. จัดการโฟลเดอร์สำหรับอัปโหลดรูปโปรไฟล์ ---
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir);
-}
-app.use('/uploads', express.static(uploadDir));
 
 // --- 3. การเชื่อมต่อ Database (TiDB Cloud) ---
 const db = mysql.createPool({
@@ -42,7 +39,25 @@ const db = mysql.createPool({
 
 const JWT_SECRET = 'my_super_secret_123';
 
-// --- 4. Middleware ตรวจสอบสิทธิ์ ---
+// --- 4. ตั้งค่า Cloudinary (!!! แก้ไข 3 บรรทัดนี้ด้วยข้อมูลจากหน้าจอของคุณ !!!) ---
+cloudinary.config({ 
+  cloud_name: 'druaw4oi7', // พี่ใส่ให้แล้วจากรูปของคุณ
+  api_key: '535754114174867', // <--- แก้ตรงนี้
+  api_secret: 'CRZiXMy-9b18hqippFDxM_D8XgQ' // <--- แก้ตรงนี้
+});
+
+// --- 5. ตั้งค่า Storage ให้เก็บรูปบน Cloud ---
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'todo-buddy-profiles',
+    allowed_formats: ['jpg', 'png', 'jpeg'],
+    transformation: [{ width: 500, height: 500, crop: 'limit' }]
+  },
+});
+const upload = multer({ storage: storage });
+
+// --- 6. Middleware ตรวจสอบสิทธิ์ ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -55,28 +70,17 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// --- 5. การตั้งค่า Multer ---
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, 'uploads/'),
-    filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
-});
-const upload = multer({ storage: storage });
-
-// --- 6. AUTH ROUTES ---
+// --- 7. AUTH ROUTES ---
 app.post('/api/register', async (req, res) => {
     const { email, password } = req.body;
     try {
         const [existing] = await db.execute('SELECT * FROM users WHERE email = ?', [email]);
         if (existing.length > 0) return res.status(400).json({ message: "email already exists" });
-
         const hashedPassword = await bcrypt.hash(password, 10);
         const name = email.split('@')[0];
         await db.execute('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', [name, email, hashedPassword]);
         res.status(201).json({ message: "user registered" });
-    } catch (err) { 
-        console.error("Register Error:", err);
-        res.status(500).json({ message: "registration failed" }); 
-    }
+    } catch (err) { res.status(500).json({ message: "registration failed" }); }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -92,7 +96,19 @@ app.post('/api/login', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "server error" }); }
 });
 
-// --- 7. TODO ROUTES ---
+// --- 8. API อัปโหลดรูปโปรไฟล์ (ตัวใหม่!) ---
+app.post('/api/profile/upload', authenticateToken, upload.single('profile_image'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ message: "no file uploaded" });
+        const imageUrl = req.file.path; // URL จาก Cloudinary
+        await db.execute('UPDATE users SET profile_image = ? WHERE id = ?', [imageUrl, req.user.id]);
+        res.json({ message: "profile image updated", profile_image: imageUrl });
+    } catch (err) {
+        res.status(500).json({ message: "failed to upload image" });
+    }
+});
+
+// --- 9. TODO ROUTES ---
 app.get('/api/todos', authenticateToken, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const status = req.query.status || 'all'; 
@@ -131,8 +147,8 @@ app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
     } catch (err) { res.status(500).json({ message: "delete error" }); }
 });
 
-// --- 8. START SERVER ---
-const PORT = process.env.PORT || 10000; // ปรับเป็น 10000 ให้เข้ากับ Default ของ Render
+// --- 10. START SERVER ---
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
     console.log(`🚀 backend system active on port ${PORT}`);
 });
