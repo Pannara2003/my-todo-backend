@@ -10,20 +10,26 @@ require('dotenv').config();
 
 const app = express();
 app.use(express.json());
-app.use(cors());
 
-// --- 1. จัดการโฟลเดอร์สำหรับอัปโหลดรูปโปรไฟล์ ---
+// --- 1. แก้ไขส่วน CORS ให้รองรับการ Deploy (สำคัญมาก!) ---
+app.use(cors({
+    origin: '*', // อนุญาตให้ทุก Domain (รวมถึง Vercel) เข้าถึงได้
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// --- 2. จัดการโฟลเดอร์สำหรับอัปโหลดรูปโปรไฟล์ ---
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir);
 }
 app.use('/uploads', express.static(uploadDir));
 
-// --- 2. การเชื่อมต่อ Database (TiDB Cloud) ---
+// --- 3. การเชื่อมต่อ Database (TiDB Cloud) ---
 const db = mysql.createPool({
     host: 'gateway01.ap-southeast-1.prod.aws.tidbcloud.com',
     user: '49QkULrURbVakzn.root', 
-    password: 'u7CRYFxQYL1g864b', // ใส่รหัสจาก Screenshot ให้แล้วครับ
+    password: 'u7CRYFxQYL1g864b', 
     database: 'test', 
     port: 4000,
     waitForConnections: true,
@@ -36,7 +42,7 @@ const db = mysql.createPool({
 
 const JWT_SECRET = 'my_super_secret_123';
 
-// --- 3. Middleware ตรวจสอบสิทธิ์ ---
+// --- 4. Middleware ตรวจสอบสิทธิ์ ---
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -49,14 +55,14 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// --- 4. การตั้งค่า Multer ---
+// --- 5. การตั้งค่า Multer ---
 const storage = multer.diskStorage({
     destination: (req, file, cb) => cb(null, 'uploads/'),
     filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
 });
 const upload = multer({ storage: storage });
 
-// --- 5. AUTH ROUTES ---
+// --- 6. AUTH ROUTES ---
 app.post('/api/register', async (req, res) => {
     const { email, password } = req.body;
     try {
@@ -67,7 +73,10 @@ app.post('/api/register', async (req, res) => {
         const name = email.split('@')[0];
         await db.execute('INSERT INTO users (name, email, password) VALUES (?, ?, ?)', [name, email, hashedPassword]);
         res.status(201).json({ message: "user registered" });
-    } catch (err) { res.status(500).json({ message: "registration failed" }); }
+    } catch (err) { 
+        console.error("Register Error:", err);
+        res.status(500).json({ message: "registration failed" }); 
+    }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -83,7 +92,7 @@ app.post('/api/login', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "server error" }); }
 });
 
-// --- 6. TODO ROUTES ---
+// --- 7. TODO ROUTES ---
 app.get('/api/todos', authenticateToken, async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const status = req.query.status || 'all'; 
@@ -122,8 +131,8 @@ app.delete('/api/todos/:id', authenticateToken, async (req, res) => {
     } catch (err) { res.status(500).json({ message: "delete error" }); }
 });
 
-// --- 7. START SERVER ---
-const PORT = process.env.PORT || 5000;
+// --- 8. START SERVER ---
+const PORT = process.env.PORT || 10000; // ปรับเป็น 10000 ให้เข้ากับ Default ของ Render
 app.listen(PORT, () => {
     console.log(`🚀 backend system active on port ${PORT}`);
 });
